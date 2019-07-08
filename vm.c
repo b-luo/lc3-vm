@@ -53,6 +53,30 @@ enum {
     FL_NEG = 1 << 2
 };
 
+// extend bits in number val, consisting of bit_count bits,
+// so it has 16 like all other values in memory
+uint16_t sign_extend(uint16_t val, int bit_count) {
+    // extract leftmost bit to check whether val is negative
+    // since negative values need additional 1 bits
+    if ((val >> (bit_count - 1)) & 0x1) {
+        val |= (0xFFFF << bit_count);
+    }
+    return val;
+}
+
+// record the sign of the value that was just written to a
+// register
+void update_cond_flags(uint16_t reg) {
+    if (registers[reg] == 0) {
+        registers[R_COND] = FL_ZRO;
+    } else if (registers[reg] >> 15) {
+        // leftmost bit = 1 means value is negative
+        registers[R_COND] = FL_NEG;
+    } else {
+        registers[R_COND] = FL_POS;
+    }
+}
+
 int main(int argc, const char *argv[]) {
     // set initial program counter address
     enum { PC_START = 0x3000 };
@@ -66,6 +90,22 @@ int main(int argc, const char *argv[]) {
 
         switch(op) {
             case OP_ADD:
+                uint16_t dest = (instr >> 9) & 0x7;
+                uint16_t src1 = (instr >> 6) & 0x7;
+                // determine instruction mode: register or immediate
+                uint16_t mode_flag = (instr >> 5) & 0x1;
+                if (mode_flag) {
+                    // immediate mode: 2nd operand to add supplied in
+                    // instruction (limited to 5 bit numbers)
+                    uint16_t imm5 = sign_extend(instr & 0x1F, 5);
+                    registers[dest] = registers[src1] + imm5;
+                } else {
+                    // register mode: 2nd operand is another source
+                    // register
+                    uint16_t src2 = instr & 0x7;
+                    registers[dest] = registers[src1] + registers[src2];
+                }
+                update_cond_flags(dest);
                 break;
             case OP_AND:
                 break;

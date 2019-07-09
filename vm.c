@@ -1,4 +1,5 @@
 /* VM simulates LC-3 computer */
+#include <stdlib.h>
 
 // each memory address holds 16 bits, total: 128Kb
 uint16_t memory[UINT16_MAX];
@@ -110,16 +111,60 @@ int main(int argc, const char *argv[]) {
                 update_cond_flags(dest);
                 break;
             case OP_AND:
+                uint16_t dest = (instr >> 9) & 0x7;
+                uint16_t src1 = (instr >> 6) & 0x7;
+
+                uint16_t mode_flag = (instr >> 5) & 0x1;
+                if (mode_flag) {
+                    uint16_t imm5 = sign_extend(instr & 0x1F, 5);
+                    registers[dest] = registers[src1] & imm5;
+                } else {
+                    uint16_t src2 = instr & 0x7;
+                    registers[dest] = registers[src1] & registers[src2];
+                }
+
+                update_cond_flags(dest);
                 break;
             case OP_NOT:
+                uint16_t dest = (instr >> 9) & 0x7;
+                uint16_t src = (instr >> 6) & 0x7;
+                registers[dest] = ~registers[src];
+                update_cond_flags(dest);
                 break;
             case OP_BR:
+                // check whether any of the bits corresponding to
+                // a condition flag is set, updating pc if so
+                uint16_t n = (instr >> 11) & 0x1;
+                uint16_t z = (instr >> 10) & 0x1;
+                uint16_t p = (instr >> 9) & 0x1;
+                if ((n && registers[R_COND] == FL_NEG) ||
+                    (p && registers[R_COND] == FL_POS) ||
+                    (z && registers[R_COND] == FL_ZRO)) {
+                    registers[R_PC] += sign_extend(instr & 0x1FF, 9);
+                }
                 break;
             case OP_JMP:
+                uint16_t base_reg = (instr >> 6) & 0x7;
+                registers[R_PC] = registers[base_reg];
                 break;
             case OP_JSR:
+                // store current pc address (location of current
+                // routine) in register 7 and then jump to address
+                // of subroutine
+                registers[R_R7] = registers[R_PC];
+                uint16_t mode_flag = (instr >> 11) & 0x1;
+                if (mode_flag) {
+                    registers[R_PC] += sign_extend(instr & 0x7FF, 11);
+                } else {
+                    uint16_t base_reg = (instr >> 6) & 0x7;
+                    registers[R_PC] = registers[base_reg];
+                }
                 break;
             case OP_LD:
+                uint16_t dest = (instr >> 9) & 0x7;
+                uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
+                registers[dest] = memory[addr];
+                update_cond_flags(dest);
                 break;
             case OP_LDI:
                 uint16_t dest = (instr >> 9) & 0x7;
@@ -130,20 +175,42 @@ int main(int argc, const char *argv[]) {
                 update_cond_flags(dest);
                 break;
             case OP_LDR:
+                uint16_t dest = (instr >> 9) & 0x7;
+                uint16_t base_reg = (instr >> 6) & 0x7;
+                uint16_t addr = registers[base_reg] + sign_extend(instr & 0x3F, 6);
+                registers[dest] = memory[addr];
+                update_cond_flags(dest);
                 break;
             case OP_LEA:
+                uint16_t dest = (instr >> 9) & 0x7;
+                uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
+                registers[dest] = addr;
+                update_cond_flags(dest);
                 break;
             case OP_ST:
+                uint16_t src = (instr >> 9) & 0x7;
+                uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
+                memory[addr] = registers[src];
                 break;
             case OP_STI:
+                uint16_t src = (instr >> 9) & 0x7;
+                uint16_t addr = memory[registers[R_PC] + sign_extend(instr & 0x1FF, 9)];
+                memory[addr] = registers[src];
                 break;
             case OP_STR:
+                uint16_t src = (instr >> 9) & 0x7;
+                uint16_t base_reg = (instr >> 6) & 0x7;
+                uint16_t addr = registers[base_reg] + sign_extend(instr & 0x3F, 6);
+                memory[addr] = registers[src];
                 break;
             case OP_TRAP:
+                registers[R_R7] = registers[R_PC];
+
                 break;
             case OP_RES:
             case OP_RTI:
             default:
+                abort();
                 break;
         }
     }

@@ -92,6 +92,7 @@ int main(int argc, const char *argv[]) {
             case OP_ADD:
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t src1 = (instr >> 6) & 0x7;
+
                 // determine instruction mode: register or immediate
                 uint16_t mode_flag = (instr >> 5) & 0x1;
                 if (mode_flag) {
@@ -105,6 +106,7 @@ int main(int argc, const char *argv[]) {
                     uint16_t src2 = instr & 0x7;
                     registers[dest] = registers[src1] + registers[src2];
                 }
+
                 update_cond_flags(dest);
                 break;
             case OP_AND:
@@ -120,6 +122,12 @@ int main(int argc, const char *argv[]) {
             case OP_LD:
                 break;
             case OP_LDI:
+                uint16_t dest = (instr >> 9) & 0x7;
+                uint16_t pc_offset = sign_extend(instr & 0x7FF, 9);
+                
+                uint16_t addr = registers[R_PC] + pc_offset;
+                reg[dest] = mem_read(mem_read(addr));
+                update_cond_flags(dest);
                 break;
             case OP_LDR:
                 break;

@@ -90,6 +90,39 @@ void update_cond_flags(uint16_t reg) {
     }
 }
 
+// swap order of bytes in 16 bit integer, which
+// changes endianness
+uint16_t swap16(uint16_t x) {
+    return (x << 8) | (x >> 8);
+}
+
+void read_image_file(FILE *file) {
+    // origin: 1st 16 bits indicate address to load program into
+    uint16_t origin;
+    // read 1 element from file, storing the result in origin
+    fread(&origin, sizeof(origin), 1, file);
+    // swap order of bytes since LC-3 programs are big endian
+    // while most computers are little endian
+    origin = swap16(origin);
+
+    uint16_t max_file_size = UINT16_MAX - origin;
+    uint16_t *p = memory + origin;
+    size_t num_addr_read = fread(p, sizeof(uint16_t), max_file_size, file);
+    // change endianness of remaining addresses
+    while (num_addr_read-- > 0) {
+        *p = swap16(*p);
+        ++p;
+    }
+}
+
+int read_image(const char *image_path) {
+    FILE *file = fopen(image_path, "rb");
+    if (!file) return 0;
+    read_image_file(file);
+    fclose(file);
+    return 1;
+}
+
 int main(int argc, const char *argv[]) {
     // set initial program counter address
     enum { PC_START = 0x3000 };
@@ -224,6 +257,7 @@ int main(int argc, const char *argv[]) {
                         registers[R_R0] = (uint16_t)getchar();
                         break;
                     case TRAP_OUT:
+                        putc((char)(registers[R_R0] & 0xFF), stdout);
                         break;
                     case TRAP_PUTS:
                         // first char of string located at address stored in R0
@@ -243,8 +277,25 @@ int main(int argc, const char *argv[]) {
                         registers[R_R0] = (uint16_t)user_input;
                         break;
                     case TRAP_PUTSP:
+                        // each char occupies 1 byte, so each memory
+                        // location holds 2 chars - output char stored
+                        // in rightmost portion of each address before
+                        // char in leftmost
+                        uint16_t *c = memory + registers[R_R0];
+                        while (*c) {
+                            uint16_t first = (*c) & 0xFF;
+                            uint16_t second = (*c) >> 8;
+                            putc((char)first, stdout);
+                            // if string has odd number of chars, leftmost
+                            // byte of some address will hold 0x00
+                            if (second) putc((char)second, stdout);
+                            ++c;
+                        }
+                        fflush(stdout);
                         break;
                     case TRAP_HALT:
+                        printf("Halting program..");
+                        running = 0;
                         break;
                 }
                 break;

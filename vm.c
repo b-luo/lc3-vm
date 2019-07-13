@@ -1,5 +1,6 @@
 /* VM simulates LC-3 computer */
 #include <stdlib.h>
+#include <stdio.h>
 
 // each memory address holds 16 bits, total: 128Kb
 uint16_t memory[UINT16_MAX];
@@ -52,6 +53,17 @@ enum {
     FL_POS = 1 << 0,
     FL_ZRO = 1 << 1,
     FL_NEG = 1 << 2
+};
+
+// trap routines allow for I/O and other functionality
+// each has an identifier, its trap code
+enum {
+    TRAP_GETC = 0x20,   // get character from stdin, not echoed
+    TRAP_OUT = 0x21,    // output character
+    TRAP_PUTS = 0x22,   // output string
+    TRAP_IN = 0x23,     // get character from stdin, echoed onto terminal
+    TRAP_PUTSP = 0x24,  // output byte string
+    TRAP_HALT = 0x25    // halt program
 };
 
 // extend bits in number val, consisting of bit_count bits,
@@ -205,7 +217,36 @@ int main(int argc, const char *argv[]) {
                 break;
             case OP_TRAP:
                 registers[R_R7] = registers[R_PC];
-
+                
+                // condition on last 8 bits, trap code, of instruction
+                switch(instr & 0xFF) {
+                    case TRAP_GETC:
+                        registers[R_R0] = (uint16_t)getchar();
+                        break;
+                    case TRAP_OUT:
+                        break;
+                    case TRAP_PUTS:
+                        // first char of string located at address stored in R0
+                        // each char occupies 16 bits
+                        uint16_t *c = memory + registers[R_R0];
+                        while (*c) {
+                            putc((char)*c, stdout);
+                            ++c;
+                        }
+                        // write all buffered data for stdout
+                        fflush(stdout);
+                        break;
+                    case TRAP_IN:
+                        printf("> ");
+                        char user_input = getchar();
+                        putc(user_input, stdout);
+                        registers[R_R0] = (uint16_t)user_input;
+                        break;
+                    case TRAP_PUTSP:
+                        break;
+                    case TRAP_HALT:
+                        break;
+                }
                 break;
             case OP_RES:
             case OP_RTI:

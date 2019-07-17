@@ -1,6 +1,13 @@
 /* VM simulates LC-3 computer */
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <signal.h>
+#include <unistd.h>     // file stream constants like STDIN_FILENO
+
+#include <sys/termios.h>
+#include <sys/time.h>
+#include <sys/types.h>
 
 // each memory address holds 16 bits, total: 128Kb
 uint16_t memory[UINT16_MAX];
@@ -163,7 +170,43 @@ int read_image(const char *image_path) {
     return 1;
 }
 
+// terminal interface
+struct termios original_tio;
+
+void disable_input_buffering() {
+    // retrieve parameters and store in termios struct
+    tcgetattr(STDIN_FILENO, &original_tio);
+    struct termios new_tio = original_tio;
+    new_tio.c_lflag &= ~ICANON & ~ECHO;
+    tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
+}
+
+void restore_input_buffering() {
+    tcsetattr(STDIN_FILENO, TCSANOW, &original_tio);
+}
+
+void handle_interrupt(int signal) {
+    restore_input_buffering();
+    printf("\n");
+    exit(-2);
+}
+
 int main(int argc, const char *argv[]) {
+    if (argc < 2) {
+        printf("Usage: lc3 [image-file1] ...\n");
+        exit(2);
+    }
+    for (int i = 1; i < argc; ++i) {
+        if (!read_image(argv[i])) {
+            printf("Failed to load image: %s\n", argv[i]);
+            exit(1);
+        }
+    }
+
+    // set up signal handler for SIGINT signals
+    signal(SIGINT, handle_interrupt);
+    disable_input_buffering();
+
     // set initial program counter address
     enum { PC_START = 0x3000 };
     registers[R_PC] = PC_START;
@@ -175,7 +218,7 @@ int main(int argc, const char *argv[]) {
         uint16_t op = instr >> 12;
 
         switch(op) {
-            case OP_ADD:
+            case OP_ADD: {      // create new scope since C doesn't allow declaration after case label
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t src1 = (instr >> 6) & 0x7;
 
@@ -195,7 +238,8 @@ int main(int argc, const char *argv[]) {
 
                 update_cond_flags(dest);
                 break;
-            case OP_AND:
+            }
+            case OP_AND: {
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t src1 = (instr >> 6) & 0x7;
 
@@ -210,13 +254,15 @@ int main(int argc, const char *argv[]) {
 
                 update_cond_flags(dest);
                 break;
-            case OP_NOT:
+            }
+            case OP_NOT: {
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t src = (instr >> 6) & 0x7;
                 registers[dest] = ~registers[src];
                 update_cond_flags(dest);
                 break;
-            case OP_BR:
+            }
+            case OP_BR: {
                 // check whether any of the bits corresponding to
                 // a condition flag is set, updating pc if so
                 uint16_t n = (instr >> 11) & 0x1;
@@ -228,11 +274,13 @@ int main(int argc, const char *argv[]) {
                     registers[R_PC] += sign_extend(instr & 0x1FF, 9);
                 }
                 break;
-            case OP_JMP:
+            }
+            case OP_JMP: {
                 uint16_t base_reg = (instr >> 6) & 0x7;
                 registers[R_PC] = registers[base_reg];
                 break;
-            case OP_JSR:
+            }
+            case OP_JSR: {
                 // store current pc address (location of current
                 // routine) in register 7 and then jump to address
                 // of subroutine
@@ -245,13 +293,15 @@ int main(int argc, const char *argv[]) {
                     registers[R_PC] = registers[base_reg];
                 }
                 break;
-            case OP_LD:
+            }
+            case OP_LD: {
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
                 registers[dest] = mem_read(addr);
                 update_cond_flags(dest);
                 break;
-            case OP_LDI:
+            }
+            case OP_LDI: {
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t pc_offset = sign_extend(instr & 0x7FF, 9);
                 
@@ -259,47 +309,55 @@ int main(int argc, const char *argv[]) {
                 registers[dest] = mem_read(mem_read(addr));
                 update_cond_flags(dest);
                 break;
-            case OP_LDR:
+            }
+            case OP_LDR: {
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t base_reg = (instr >> 6) & 0x7;
                 uint16_t addr = registers[base_reg] + sign_extend(instr & 0x3F, 6);
                 registers[dest] = mem_read(addr);
                 update_cond_flags(dest);
                 break;
-            case OP_LEA:
+            }
+            case OP_LEA: {
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
                 registers[dest] = addr;
                 update_cond_flags(dest);
                 break;
-            case OP_ST:
+            }
+            case OP_ST: {
                 uint16_t src = (instr >> 9) & 0x7;
                 uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
                 mem_write(addr, registers[src]);
                 break;
-            case OP_STI:
+            }
+            case OP_STI: {
                 uint16_t src = (instr >> 9) & 0x7;
                 uint16_t addr = memory[registers[R_PC] + sign_extend(instr & 0x1FF, 9)];
                 mem_write(addr, registers[src]);
                 break;
-            case OP_STR:
+            }
+            case OP_STR: {
                 uint16_t src = (instr >> 9) & 0x7;
                 uint16_t base_reg = (instr >> 6) & 0x7;
                 uint16_t addr = registers[base_reg] + sign_extend(instr & 0x3F, 6);
                 mem_write(addr, registers[src]);
                 break;
-            case OP_TRAP:
+            }
+            case OP_TRAP: {
                 registers[R_R7] = registers[R_PC];
                 
                 // condition on last 8 bits, trap code, of instruction
                 switch(instr & 0xFF) {
-                    case TRAP_GETC:
+                    case TRAP_GETC: {
                         registers[R_R0] = (uint16_t)getchar();
                         break;
-                    case TRAP_OUT:
+                    }
+                    case TRAP_OUT: {
                         putc((char)(registers[R_R0] & 0xFF), stdout);
                         break;
-                    case TRAP_PUTS:
+                    }
+                    case TRAP_PUTS: {
                         // first char of string located at address stored in R0
                         // each char occupies 16 bits
                         uint16_t *c = memory + registers[R_R0];
@@ -310,13 +368,15 @@ int main(int argc, const char *argv[]) {
                         // write all buffered data for stdout
                         fflush(stdout);
                         break;
-                    case TRAP_IN:
+                    }
+                    case TRAP_IN: {
                         printf("> ");
                         char user_input = getchar();
                         putc(user_input, stdout);
                         registers[R_R0] = (uint16_t)user_input;
                         break;
-                    case TRAP_PUTSP:
+                    }
+                    case TRAP_PUTSP: {
                         // each char occupies 1 byte, so each memory
                         // location holds 2 chars - output char stored
                         // in rightmost portion of each address before
@@ -333,12 +393,15 @@ int main(int argc, const char *argv[]) {
                         }
                         fflush(stdout);
                         break;
-                    case TRAP_HALT:
+                    }
+                    case TRAP_HALT: {
                         printf("Halting program..");
                         running = 0;
                         break;
+                    }
                 }
                 break;
+            }
             case OP_RES:
             case OP_RTI:
             default:
@@ -346,4 +409,6 @@ int main(int argc, const char *argv[]) {
                 break;
         }
     }
+
+    restore_input_buffering();
 }

@@ -66,6 +66,46 @@ enum {
     TRAP_HALT = 0x25    // halt program
 };
 
+// memory mapped registers: access through the address assigned
+// to each
+enum {
+    MR_KBSR = 0xFE00,   // keyboard status: indicate if a key has been pressed
+    MR_KBDR = 0xFE02    // keyboard data: record key pressed
+};
+
+uint16_t check_key() {
+    fd_set readfds;     // fixed size buffer holding file descriptor set
+    FD_ZERO(&readfds);  // initialize readfds to be empty set
+    FD_SET(STDIN_FILENO, &readfds); // add file descriptor to set
+
+    // timeout: min. interval select should block waiting for file descriptor
+    // to become ready
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0;
+    // select: monitor file descriptors to see if they are ready for 
+    // returns num. of file descriptors
+    return select(1, &readfds, NULL, NULL, &timeout) != 0;
+}
+
+// adding memory mapped registers requires following functions to
+// access memory
+uint16_t mem_read(uint16_t addr) {
+    if (addr == MR_KBSR) {
+        if (check_key()) {
+            memory[MR_KBSR] = (1 << 15);
+            memory[MR_KBDR] = getchar();
+        } else {
+            memory[MR_KBSR] = 0;
+        }
+    }
+    return memory[addr];
+}
+
+void mem_write(uint16_t addr, uint16_t val) {
+    memory[addr] = val;
+}
+
 // extend bits in number val, consisting of bit_count bits,
 // so it has 16 like all other values in memory
 uint16_t sign_extend(uint16_t val, int bit_count) {
@@ -208,7 +248,7 @@ int main(int argc, const char *argv[]) {
             case OP_LD:
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
-                registers[dest] = memory[addr];
+                registers[dest] = mem_read(addr);
                 update_cond_flags(dest);
                 break;
             case OP_LDI:
@@ -216,14 +256,14 @@ int main(int argc, const char *argv[]) {
                 uint16_t pc_offset = sign_extend(instr & 0x7FF, 9);
                 
                 uint16_t addr = registers[R_PC] + pc_offset;
-                reg[dest] = mem_read(mem_read(addr));
+                registers[dest] = mem_read(mem_read(addr));
                 update_cond_flags(dest);
                 break;
             case OP_LDR:
                 uint16_t dest = (instr >> 9) & 0x7;
                 uint16_t base_reg = (instr >> 6) & 0x7;
                 uint16_t addr = registers[base_reg] + sign_extend(instr & 0x3F, 6);
-                registers[dest] = memory[addr];
+                registers[dest] = mem_read(addr);
                 update_cond_flags(dest);
                 break;
             case OP_LEA:
@@ -235,18 +275,18 @@ int main(int argc, const char *argv[]) {
             case OP_ST:
                 uint16_t src = (instr >> 9) & 0x7;
                 uint16_t addr = registers[R_PC] + sign_extend(instr & 0x1FF, 9);
-                memory[addr] = registers[src];
+                mem_write(addr, registers[src]);
                 break;
             case OP_STI:
                 uint16_t src = (instr >> 9) & 0x7;
                 uint16_t addr = memory[registers[R_PC] + sign_extend(instr & 0x1FF, 9)];
-                memory[addr] = registers[src];
+                mem_write(addr, registers[src]);
                 break;
             case OP_STR:
                 uint16_t src = (instr >> 9) & 0x7;
                 uint16_t base_reg = (instr >> 6) & 0x7;
                 uint16_t addr = registers[base_reg] + sign_extend(instr & 0x3F, 6);
-                memory[addr] = registers[src];
+                mem_write(addr, registers[src]);
                 break;
             case OP_TRAP:
                 registers[R_R7] = registers[R_PC];
